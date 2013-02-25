@@ -1,4 +1,4 @@
-name := "hello"
+name := "geocoder"
 
 version := "1.0"
 

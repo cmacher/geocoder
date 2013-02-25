@@ -23,7 +23,7 @@ object Geocoder extends App {
 
     def mapQuestReq =
       url("http://www.mapquestapi.com/geocoding/v1/address")
-        .addQueryParameter("key","Fmjtd%7Cluub210rn0%2Cr0%3Do5-96tsd6")
+        .addQueryParameter("key","")
         .addQueryParameter("callback","renderOptions")
         .addQueryParameter("outFormat","json")
         .addQueryParameter("inFormat","xml")

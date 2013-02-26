@@ -1,45 +1,99 @@
 import io.Source
 import dispatch._
+import java.io.FileWriter
 
 object Geocoder extends App {
 
+  val input = args.headOption.getOrElse(throw new IllegalArgumentException("Input file needed as single program argument."))
 
-  Source.fromFile("src/addresses.csv").getLines().take(3).foreach(line => {
-    if (!line.startsWith("PLZ")) {
-      val address = parseAddress(line)
-      for (res <- fetchGeoCode(address).right)
-        println(res)
+  val fileWriter = new FileWriter("geocodes.csv")
+
+  try {
+    Source.fromFile(input).getLines().drop(1).foreach {
+      line =>
+        val address = parseAddress(line)
+        val gc = geocode(address)().right
+        val latLng = (for (code <- gc) yield s"${code.lat},${code.lng}").right.toOption.getOrElse("NA,NA")
+        val outputLine = s"${address.postcode},${latLng}\n"
+        fileWriter.write(outputLine)
     }
-  })
+  } finally {
+    fileWriter.close()
+  }
+  println("Done.")
 
+  def geocode(address: Address) = {
+    for {
+      xmlEither <- fetchGeoCode(address).right
+      gc <- Http.promise(extractGeocodes(xmlEither)).right
+    } yield gc
+  }
 
-  def fetchGeoCode(address: Address): Promise[Either[String, String]] =  {
+  def extractGeocodes(xml: scala.xml.Elem): Either[String, Geocode] = {
 
-    val location = <location>
-      <city>{address.city}</city>
-      <country>{address.country}</country>
-      <postalCode>{address.postcode}</postalCode>
-    </location>
+    val seq = (for {
+      elem <- xml \\ "latLng"
+      lat <- elem \ "lat"
+      lng <- elem \ "lng"
+    } yield Geocode(lat.text, lng.text))
+
+    seq.headOption.toRight {
+      "No geocodes found"
+    }
+  }
+
+  def fetchGeoCode(address: Address): Promise[Either[String, scala.xml.Elem]] = {
+
+    val addressXml = <address>
+      <location>
+        <country>
+          {address.country}
+        </country>
+        <city>
+          {address.city}
+        </city>
+        <postalCode>
+          {address.postcode}
+        </postalCode>
+      </location>
+      <options>
+        <thumbMaps>false</thumbMaps>
+      </options>
+    </address>
 
     def mapQuestReq =
-      url("http://www.mapquestapi.com/geocoding/v1/address")
-        .addQueryParameter("key","")
-        .addQueryParameter("callback","renderOptions")
-        .addQueryParameter("outFormat","json")
-        .addQueryParameter("inFormat","xml")
-        .addQueryParameter("xml", location.text)
+      url("http://open.mapquestapi.com/geocoding/v1/address")
+        .addQueryParameter("callback", "renderOptions")
+        .addQueryParameter("outFormat", "xml")
+        .addQueryParameter("inFormat", "xml")
+        .addQueryParameter("xml", addressXml.toString())
 
-    val res = Http(mapQuestReq OK as.String).either
+    val response = Http(mapQuestReq OK as.xml.Elem).either
 
-    for (str <- res.left)
-        yield "Error " + str.getMessage
+    for (str <- response.left)
+    yield "Error " + str.getMessage
   }
 
   case class Address(postcode: String, city: String, country: String)
 
+  case class Geocode(lat: String, lng: String)
+
   def parseAddress(s: String): Address = {
-    val list:Array[String] = s.split(',')
-    Address(list(0), list(1), "Austria")
+    val list: Array[String] = s.split(',')
+    Address(trim(list(0)), simplifyCity(trim(list(1))), trim(list(2)))
   }
 
+  def simplifyCity(st: String) = {
+    if (st.contains("ß") || st.contains(".")) ""
+    else if (st.contains("-") || st.contains(" ")) st.takeWhile(c => c != '-' && c !=' ')
+    else {
+      st.replaceAll("ö", "o")
+        .replaceAll("ä", "a")
+        .replaceAll("ü", "u")
+    }
+  }
+
+  def trim(s: String): String = {
+    s.replaceAll("\"", "")
+  }
 }
